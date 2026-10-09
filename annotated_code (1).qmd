@@ -1,0 +1,400 @@
+---
+title: "Annotated Code"
+author: "Shapla Akter"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+  eval: false
+---
+
+# About this document
+
+This file contains the R code used to create the six figures included in the data story. It contains code and explanatory comments only; the figures themselves appear in the `data_story.pdf`.
+
+Figures produced by this code:
+
+- Figure 1: Filled line chart — national fatality trend
+- Figure 2: Calendar heatmap — year by month pattern
+- Figure 3: Slope chart — state comparison 1989 vs 2021
+- Figure 4: Stacked bar chart — time slot and crash type
+- Figure 5: Lollipop chart — road user totals
+- Figure 6: Diverging bar chart — age group and gender
+
+---
+
+# Setup
+
+## Packages
+
+```{r packages}
+# Data
+library(dplyr)     # for filtering, grouping, summarising
+library(tidyr)
+library(readr)     # for reading the CSV file
+library(forcats)
+
+# Charts
+library(ggplot2)   # all six figures are built with ggplot2
+library(scales)    # for comma() to format numbers on axes
+library(ggrepel)   # for non-overlapping labels in slope chart
+```
+
+## Colour palette
+
+```{r colours}
+# These four colours are used across all six figures.
+# Red  = primary highlight colour
+# Blue = comparison group or context
+
+INK  <- "#1F1F1F"   # for text and labels
+GREY <- "#777777"   # for axis text and secondary labels
+RED  <- "#B5533C"   # main accent colour
+BLUE <- "#3A6EA8"   # comparison colour
+```
+
+## Shared ggplot theme
+
+```{r theme}
+
+theme_story <- function(base = 11) {
+  theme_minimal(base_size = base) +
+    theme(
+      plot.background    = element_rect(fill = "white", colour = NA),
+      panel.background   = element_rect(fill = "white", colour = NA),
+      panel.grid.minor   = element_blank(),
+      panel.grid.major.y = element_line(colour = "#EEEEEE",
+                                         linewidth = 0.4),
+      panel.grid.major.x = element_blank(),
+      axis.text          = element_text(colour = GREY, size = 9),
+      axis.title         = element_blank(),
+      plot.caption       = element_blank(),
+      legend.position    = "top",
+      legend.title       = element_blank(),
+      legend.text        = element_text(size = 9, colour = INK),
+      plot.margin        = margin(4, 4, 2, 4)
+    )
+}
+```
+
+## Load and clean data
+
+```{r load-data}
+# Read the dataset.
+crash <- read_csv("Crash_Data.csv", show_col_types = FALSE)
+```
+
+```{r clean-data}
+# Convert columns that came in as text to numeric.
+crash <- crash |>
+  mutate(
+    Age   = as.numeric(Age),
+    Year  = as.numeric(Year),
+    Month = as.numeric(Month)
+  )
+
+# Set factor order for Day of week and Time of day.
+
+crash <- crash |>
+  mutate(
+    `Day of week` = fct_relevel(`Day of week`, "Weekday", "Weekend"),
+    `Time of day` = fct_relevel(`Time of day`, "Day", "Night")
+  )
+
+# For figures that use gender, drop the one record where gender is listed as Unspecified.
+crash_g <- crash |>
+  filter(Gender %in% c("Male", "Female"))
+```
+
+---
+
+# Figure 1 — Filled line chart
+
+```{r fig1}
+# Count total fatalities for each year.
+yearly <- crash |>
+  group_by(Year) |>
+  summarise(n = n(), .groups = "drop")
+
+# The line emphasises the year-to-year change in fatalities.
+# Two annotations mark the start and end values so the reader
+
+fig1 <- ggplot(yearly, aes(x = Year, y = n)) +
+  geom_area(fill = RED, alpha = 0.12) +
+  geom_line(colour = RED, linewidth = 1.2) +
+  geom_point(colour = RED, size = 1.8, alpha = 0.7) +
+  # Label the opening value
+  annotate("text", x = 1990, y = 2780,
+           label = "2,800 deaths (1989)",
+           hjust = 0, size = 3, colour = INK) +
+  # Label the closing value in the accent colour
+  annotate("text", x = 2020.5, y = 720,
+           label = "843 deaths (2021)",
+           hjust = 1, size = 3, colour = RED, fontface = "bold") +
+  # Dotted lines to mark two major policy periods
+  geom_vline(xintercept = 1997, linetype = "dotted",
+             colour = GREY, linewidth = 0.5) +
+  annotate("text", x = 1997.5, y = 2920, hjust = 0,
+           size = 2.5, colour = GREY,
+           label = "RBT & seatbelt\nenforcement") +
+  geom_vline(xintercept = 2011, linetype = "dotted",
+             colour = GREY, linewidth = 0.5) +
+  annotate("text", x = 2011.5, y = 2920, hjust = 0,
+           size = 2.5, colour = GREY,
+           label = "National Road\nSafety Strategy") +
+  scale_y_continuous(labels = comma, limits = c(0, 3200),
+                     breaks = seq(0, 3000, 500)) +
+  scale_x_continuous(breaks = seq(1990, 2020, 5)) +
+  theme_story()
+```
+
+---
+
+# Figure 2 — Calendar heatmap
+
+```{r fig2}
+# Filtered to 2000 onwards because the chart would be very tall
+ym <- crash |>
+  filter(Year >= 2000) |>
+  group_by(Year, Month) |>
+  summarise(n = n(), .groups = "drop")
+
+# Colour goes from pale (few deaths) to dark red (many deaths).
+# This shows both the long-term improvement (rows get paler)
+# and the seasonal pattern (January tends to be darker).
+
+fig2 <- ggplot(ym, aes(x = Month, y = Year, fill = n)) +
+  geom_tile(colour = "white", linewidth = 0.6) +
+  scale_fill_gradient(low = "#FDF0EC", high = RED,
+                      name = "Deaths/month") +
+  scale_x_continuous(breaks = 1:12, labels = month.abb,
+                     position = "top", expand = c(0, 0)) +
+  scale_y_reverse(breaks = seq(2000, 2020, 5),
+                  expand = c(0, 0)) +
+  theme_story() +
+  theme(
+    panel.grid       = element_blank(),
+    axis.text.x      = element_text(size = 9, colour = INK),
+    legend.position  = "right",
+    legend.key.height = unit(1.2, "cm"),
+    legend.title     = element_text(size = 8)
+  )
+```
+
+---
+
+# Figure 3 — Slope chart
+
+```{r fig3}
+# fatality count for each state in 1989 and 2021 only.
+
+state_slope <- crash |>
+  group_by(State, Year) |>
+  summarise(n = n(), .groups = "drop") |>
+  filter(Year %in% c(1989, 2021))
+
+
+# States with less than 60% decline are coloured red.
+# These are the slow-progress states the story focuses on.
+pct_tbl <- state_slope |>
+  pivot_wider(names_from = Year, values_from = n,
+              names_prefix = "y") |>
+  mutate(
+    pct  = (y2021 - y1989) / y1989 * 100, # Calculate percentage change per state.
+    slow = pct > -60
+  )
+
+state_slope <- left_join(state_slope,
+                          select(pct_tbl, State, slow),
+                          by = "State")
+
+
+left_labs  <- filter(state_slope, Year == 1989)
+right_labs <- filter(state_slope, Year == 2021) |>
+  left_join(select(pct_tbl, State, pct), by = "State") |>
+  mutate(lab = paste0(State, "  ", round(pct), "%"))
+
+# ggrepel is used for both sets of labels so they do not overlap.
+fig3 <- ggplot(state_slope,
+               aes(x = factor(Year), y = n,
+                   group = State, colour = slow)) +
+  geom_line(linewidth = 1.1, alpha = 0.9) +
+  geom_point(size = 3.5) +
+  geom_text_repel(data = left_labs, aes(label = State),
+                  hjust = 1, nudge_x = -0.1, size = 3,
+                  show.legend = FALSE, direction = "y",
+                  segment.colour = "grey80",
+                  segment.size = 0.3) +
+  geom_text_repel(data = right_labs, aes(label = lab),
+                  hjust = 0, nudge_x = 0.1, size = 3,
+                  show.legend = FALSE, direction = "y",
+                  segment.colour = "grey80",
+                  segment.size = 0.3) +
+  scale_colour_manual(
+    values = c("TRUE" = RED, "FALSE" = BLUE),
+    labels = c("TRUE"  = "Slower progress (< 60% decline)",
+               "FALSE" = "Faster progress (> 60% decline)")
+  ) +
+  scale_y_continuous(labels = comma) +
+  scale_x_discrete(expand = expansion(add = 1.5)) +
+  theme_story() +
+  theme(
+    axis.text.x     = element_text(size = 11, colour = INK,
+                                    face = "bold"),
+    legend.position = "bottom"
+  )
+```
+
+---
+
+# Figure 4 — Stacked bar chart
+
+```{r fig4}
+# Group fatalities by day of week, time of day, and crash type.
+tod_dow <- crash |>
+  group_by(`Day of week`, `Time of day`, `Crash Type`) |>
+  summarise(n = n(), .groups = "drop") |>
+  mutate(
+    slot = fct_relevel(
+      paste(`Day of week`, `Time of day`),
+      "Weekday Day", "Weekday Night",
+      "Weekend Day", "Weekend Night"
+    )
+  )
+
+# Red = single vehicle, Blue = multiple vehicle.
+# White labels inside each bar show exact counts so the reader
+
+fig4 <- ggplot(tod_dow,
+               aes(x = slot, y = n, fill = `Crash Type`)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = comma(n)),
+            position = position_stack(vjust = 0.5),
+            colour = "white", size = 3.2, fontface = "bold") +
+  scale_fill_manual(
+    values = c("Single" = RED, "Multiple" = BLUE),
+    labels = c("Single"   = "Single-vehicle crash",
+               "Multiple" = "Multi-vehicle crash")
+  ) +
+  scale_y_continuous(labels = comma) +
+  scale_x_discrete(labels = c(
+    "Weekday Day"   = "Weekday\nDay",
+    "Weekday Night" = "Weekday\nNight",
+    "Weekend Day"   = "Weekend\nDay",
+    "Weekend Night" = "Weekend\nNight"
+  )) +
+  theme_story()
+```
+
+---
+
+# Figure 5 — Lollipop chart
+
+```{r fig5}
+# Count total fatalities per road user type.
+# Arranged from lowest to highest so the chart reads
+
+road_totals <- crash |>
+  filter(`Road User` %in% c("Driver", "Passenger", "Pedestrian",
+                             "Motorcycle rider", "Pedal cyclist")) |>
+  group_by(`Road User`) |>
+  summarise(n = n(), .groups = "drop") |>
+  arrange(n) |>
+  mutate(`Road User` = factor(`Road User`, levels = `Road User`))
+
+# A lollipop chart has a stem (segment) and a dot (point).
+
+# The count is printed inside each dot.
+
+fig5 <- ggplot(road_totals, aes(x = n, y = `Road User`)) +
+  geom_segment(aes(x = 0, xend = n, yend = `Road User`),
+               colour = "#CCCCCC", linewidth = 1) +
+  geom_point(size = 12, colour = RED) +
+  geom_text(aes(label = comma(n)),
+            colour = "white", size = 2.8, fontface = "bold") +
+  scale_x_continuous(labels = comma,
+                     expand = expansion(mult = c(0, 0.1))) +
+  theme_story() +
+  theme(
+    panel.grid.major.x = element_line(colour = "#EEEEEE",
+                                       linewidth = 0.4),
+    panel.grid.major.y = element_blank()
+  )
+```
+
+---
+
+# Figure 6 — Diverging bar chart
+
+```{r fig6}
+# Age group labels for the legend
+age_labs <- c("0_to_16"     = "0-16",
+              "17_to_25"    = "17-25",
+              "26_to_39"    = "26-39",
+              "40_to_64"    = "40-64",
+              "65_to_74"    = "65-74",
+              "75_or_older" = "75+")
+
+# red for the young groups,
+# blue for middle age, lighter shades for older groups.
+age_cols <- c("0_to_16"     = "#E8D5CF",
+              "17_to_25"    = RED,
+              "26_to_39"    = "#C97A61",
+              "40_to_64"    = BLUE,
+              "65_to_74"    = "#7AA3C4",
+              "75_or_older" = "#B8CCE0")
+
+
+# Female counts are made negative so they plot to the left of zero.
+
+# Male counts stay positive and plot to the right.
+arg <- crash |>
+  filter(
+    Gender     %in% c("Male", "Female"),
+    `Road User` %in% c("Driver", "Passenger", "Pedestrian",
+                        "Motorcycle rider", "Pedal cyclist"),
+    `Age Group` %in% c("0_to_16", "17_to_25", "26_to_39",
+                        "40_to_64", "65_to_74", "75_or_older")
+  ) |>
+  group_by(`Age Group`, `Road User`, Gender) |>
+  summarise(n = n(), .groups = "drop") |>
+  mutate(
+    plot_val    = ifelse(Gender == "Female", -n, n),
+    `Road User` = fct_relevel(`Road User`,
+                   "Pedal cyclist", "Motorcycle rider",
+                   "Pedestrian", "Passenger", "Driver"),
+    `Age Group` = fct_relevel(`Age Group`,
+                   "0_to_16", "17_to_25", "26_to_39",
+                   "40_to_64", "65_to_74", "75_or_older")
+  )
+
+# The diverging bar puts female on the left and male on the right.
+# The x axis labels show absolute values on both sides so the
+# reader reads them as counts, not negative numbers.
+
+
+fig6 <- ggplot(arg,
+               aes(x = plot_val, y = `Road User`,
+                   fill = `Age Group`)) +
+  geom_col() +
+  geom_vline(xintercept = 0, colour = INK, linewidth = 0.7) +
+  annotate("text", x = -10000, y = 5.65,
+           label = "<-- Female", colour = GREY,
+           size = 3, fontface = "italic") +
+  annotate("text", x = 10000, y = 5.65,
+           label = "Male -->", colour = GREY, size = 3) +
+  scale_x_continuous(
+    labels = function(x) comma(abs(x)),
+    breaks = c(-15000, -10000, -5000, 0,
+                5000,  10000,  15000, 20000),
+    limits = c(-20000, 20000)
+  ) +
+  scale_fill_manual(values = age_cols, labels = age_labs) +
+  theme_story() +
+  theme(legend.position = "top")
+```
+
